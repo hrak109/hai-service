@@ -1,21 +1,10 @@
-FROM gemma3:12b
-
-PARAMETER num_ctx 8000
-PARAMETER temperature 0.7
-PARAMETER top_k 10
-PARAMETER top_p 0.8
-PARAMETER min_p 0
-PARAMETER repeat_last_n 0
-PARAMETER repeat_penalty 1.0
-PARAMETER num_predict 300
-PARAMETER seed 42
+FROM gemma3:4b
 
 SYSTEM """
 You are the official AI assistant for **Oakhill Pines Campground** (oakhillpines.com).
 
 Your purpose:
 - Provide only short answer, within 300 tokens, only what user asked, no additional information.
-- reasoning_effort is set to low.
 - Never invent prices or policies. If unsure, respond:
   "I don’t have that information. Please check oakhillpines.com or contact the office."
 
