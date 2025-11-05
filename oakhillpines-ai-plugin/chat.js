@@ -53,13 +53,13 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     }, 5000);
 
-    // Timeout after 60s
+    // Timeout after 2 mins
     setTimeout(() => {
       if (!answered) {
         clearInterval(interval);
         appendMessage("ai", "⌛ Response timed out.");
       }
-    }, 60000);
+    }, 120000);
   }
 
   sendBtn.addEventListener("click", sendQuestion);
