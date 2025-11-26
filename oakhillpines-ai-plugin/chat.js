@@ -12,6 +12,11 @@ document.addEventListener("DOMContentLoaded", () => {
     messagesDiv.scrollTop = messagesDiv.scrollHeight;
   }
 
+  if (!sessionStorage.getItem("greeted")) {
+        appendMessage("ai", "Hi. I am Oakhill Pines AI! How can I help you today?");
+        sessionStorage.setItem("greeted", "true");
+    }
+
   async function sendQuestion() {
     const question = input.value.trim();
     if (!question) return;
@@ -29,7 +34,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const data = await res.json();
       pollAnswer(data.question_id);
     } catch (err) {
-      appendMessage("ai", "❌ Failed to reach API.");
+      appendMessage("ai", "❌ AI service currently not available.");
     }
   }
 

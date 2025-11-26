@@ -12,7 +12,7 @@ function ai_chat_enqueue_scripts() {
 
     // Pass the API URL to JavaScript
     wp_localize_script('ai-chat-script', 'aiChat', array(
-        'apiUrl' => 'https://locate-aye-asthma-pollution.trycloudflare.com'
+        'apiUrl' => 'api.oakhillpines.com'
     ));
 }
 add_action('wp_enqueue_scripts', 'ai_chat_enqueue_scripts');
