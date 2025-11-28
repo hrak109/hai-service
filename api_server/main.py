@@ -25,7 +25,8 @@ REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
 r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
 
 class Question(BaseModel):
-    text: str
+    q_text: str
+    auth_params: str
 
 @app.post("/ask")
 def ask_question(q: Question):
@@ -33,7 +34,7 @@ def ask_question(q: Question):
         raise HTTPException(status_code=400, detail="Empty question")
 
     question_id = str(uuid.uuid4())
-    r.rpush("questions", f"{question_id}|{q.text}")
+    r.rpush("questions", f"{question_id}|{q.q_text}|{q.auth_params}")
     return {"question_id": question_id, "status": "queued"}
 
 # ✅ New endpoint for WordPress polling
