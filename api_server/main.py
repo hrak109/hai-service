@@ -30,7 +30,7 @@ class Question(BaseModel):
 
 @app.post("/ask")
 def ask_question(q: Question):
-    if not q.text.strip():
+    if not q.q_text.strip():
         raise HTTPException(status_code=400, detail="Empty question")
 
     question_id = str(uuid.uuid4())
