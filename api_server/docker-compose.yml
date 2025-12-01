@@ -1,19 +1,52 @@
 services:
-  redis:
+  redis-public:
     image: redis:7
-    container_name: redis
+    container_name: redis-public
     ports:
       - "6379:6379"
 
-  api:
-    build: .
-    container_name: fastapi-api
+  redis-private:
+    image: redis:7
+    container_name: redis-private
+    command: redis-server --port 6380
     ports:
-      - "8000:8000"
+      - "6380:6380"
+
+  gateway:
+    image: nginx:latest
+    container_name: gateway
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - public-api
+      - private-api
+
+  public-api:
+    build: .
+    container_name: public-api
+    expose:
+      - "8000"
     environment:
-      - REDIS_HOST=redis
+      - REDIS_HOST=redis-public
       - REDIS_PORT=6379
     volumes:
-      - ./:/app  # Mount local code, enables auto-reload
+      - ./:/app
     depends_on:
-      - redis
+      - redis-public
+    command: uvicorn public_api:app --host 0.0.0.0 --port 8000 --reload
+
+  private-api:
+    build: .
+    container_name: private-api
+    expose:
+      - "8001"
+    environment:
+      - REDIS_HOST=redis-private
+      - REDIS_PORT=6380
+    volumes:
+      - ./:/app
+    depends_on:
+      - redis-private
+    command: uvicorn private_api:app --host 0.0.0.0 --port 8001 --reload

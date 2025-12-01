@@ -37,7 +37,6 @@ def ask_question(q: Question):
     r.rpush("questions", f"{question_id}|{q.q_text}|{q.auth_params}")
     return {"question_id": question_id, "status": "queued"}
 
-# ✅ New endpoint for WordPress polling
 @app.get("/get_answer/{question_id}")
 def get_answer(question_id: str):
     key = f"answer:{question_id}"
@@ -46,5 +45,4 @@ def get_answer(question_id: str):
     if answer:
         return {"question_id": question_id, "status": "answered", "answer": answer}
     else:
-        # Still queued or not yet processed
         return {"question_id": question_id, "status": "queued"}
