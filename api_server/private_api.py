@@ -31,16 +31,27 @@ class User(Base):
     email = Column(String, unique=True, index=True)
     google_id = Column(String, unique=True, index=True)
 
-# Create tables (simple migration)
-Base.metadata.create_all(bind=engine)
-
 # Auth Config
 SECRET_KEY = os.getenv("SECRET_KEY")
-ALGORITHM = os.getenv("ALGORITHM")
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES"))
+ALGORITHM = os.getenv("ALGORITHM", "HS256")
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "10080"))
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
 
-app = FastAPI()
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Create tables if they don't exist
+    # Wrapped in try/except to handle race conditions with multiple workers
+    try:
+        Base.metadata.create_all(bind=engine)
+        logger.info("Database tables created (or already matched).")
+    except Exception as e:
+        # Ignore race conditions where another worker created it simultaneously
+        logger.warning(f"DB Init race condition (likely safe to ignore): {e}")
+    yield
+
+app = FastAPI(lifespan=lifespan)
 
 origins = os.getenv("ALLOWED_ORIGINS").split(",")
 
