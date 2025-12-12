@@ -11,9 +11,16 @@ import redis
 import uuid
 import os
 import datetime
+import logging
+
+# Configure Logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Database Setup
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://user:password@postgres:5432/hai_db")
+POSTGRES_USER = os.getenv("POSTGRES_USER")
+POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
+DATABASE_URL = f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@postgres:5432/hai_db"
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
@@ -28,18 +35,14 @@ class User(Base):
 Base.metadata.create_all(bind=engine)
 
 # Auth Config
-SECRET_KEY = "CHANGE_THIS_IN_PRODUCTION_SECRET_KEY" 
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7 # 1 week
+SECRET_KEY = os.getenv("SECRET_KEY")
+ALGORITHM = os.getenv("ALGORITHM")
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES"))
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
 
 app = FastAPI()
 
-origins = [
-    "https://oakhillpines.com",
-    "https://www.oakhillpines.com",
-    "http://localhost:8081", # Expo default
-    "*" # For dev
-]
+origins = os.getenv("ALLOWED_ORIGINS").split(",")
 
 app.add_middleware(
     CORSMiddleware,
@@ -49,8 +52,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
-REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
+REDIS_HOST = os.getenv("REDIS_HOST")
+REDIS_PORT = int(os.getenv("REDIS_PORT"))
 r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
 
 def get_db():
@@ -78,7 +81,7 @@ def google_login(auth: GoogleAuth, db: Session = Depends(get_db)):
     try:
         # Verify Google Token
         # In production, pass the CLIENT_ID as the second argument to verify_oauth2_token
-        idinfo = id_token.verify_oauth2_token(auth.id_token, google_requests.Request())
+        idinfo = id_token.verify_oauth2_token(auth.id_token, google_requests.Request(), GOOGLE_CLIENT_ID)
         
         userid = idinfo['sub']
         email = idinfo.get('email', '')
@@ -101,7 +104,7 @@ def google_login(auth: GoogleAuth, db: Session = Depends(get_db)):
         return {"access_token": encoded_jwt, "token_type": "bearer"}
         
     except ValueError as e:
-        print(f"Auth Error: {e}")
+        logger.error(f"Auth Error: {e}")
         raise HTTPException(status_code=401, detail="Invalid Google Token")
 
 # Dependency for protected routes
@@ -136,7 +139,7 @@ def ask_question(q: Question, user: User = Depends(get_current_user)):
     # We can inject user-specific auth params here
     auth_params = f"user:{user.id}" 
     
-    r.rpush("questions", f"{question_id}|{q.q_text}|{auth_params}")
+    r.rpush("questions:private", f"{question_id}|{q.q_text}|{auth_params}")
     return {"question_id": question_id, "status": "queued"}
 
 @app.get("/get_answer/{question_id}")

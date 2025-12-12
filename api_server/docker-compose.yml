@@ -16,9 +16,9 @@ services:
     image: postgres:15
     container_name: postgres
     environment:
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: hai_db
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     ports:
       - "5432:5432"
     volumes:
@@ -28,9 +28,11 @@ services:
     image: nginx:latest
     container_name: gateway
     ports:
-      - "8080:80"
+      - "80:80"
+      - "443:443"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
     depends_on:
       - public-api
       - private-api
@@ -41,13 +43,12 @@ services:
     expose:
       - "8000"
     environment:
-      - REDIS_HOST=redis-public
-      - REDIS_PORT=6379
-    volumes:
-      - ./:/app
+      - REDIS_HOST=${REDIS_PUBLIC_HOST}
+      - REDIS_PORT=${REDIS_PUBLIC_PORT}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS_PUBLIC}
     depends_on:
       - redis-public
-    command: uvicorn public_api:app --host 0.0.0.0 --port 8000 --reload
+    command: gunicorn public_api:app --workers 4 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
 
   private-api:
     build: .
@@ -55,15 +56,16 @@ services:
     expose:
       - "8001"
     environment:
-      - REDIS_HOST=redis-private
-      - REDIS_PORT=6380
-      - DATABASE_URL=postgresql://user:password@postgres:5432/hai_db
-    volumes:
-      - ./:/app
+      - REDIS_HOST=${REDIS_PRIVATE_HOST}
+      - REDIS_PORT=${REDIS_PRIVATE_PORT}
+      - DATABASE_URL=${DATABASE_URL}
+      - SECRET_KEY=${SECRET_KEY}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS_PRIVATE}
     depends_on:
       - redis-private
       - postgres
-    command: uvicorn private_api:app --host 0.0.0.0 --port 8001 --reload
+    command: gunicorn private_api:app --workers 4 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:8001
 
 volumes:
   postgres_data:

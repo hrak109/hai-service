@@ -1,8 +1,9 @@
-fastapi
-uvicorn
-redis
-sqlalchemy
-psycopg2-binary
-python-jose[cryptography]
-google-auth
-requests
+fastapi==0.109.0
+uvicorn==0.27.0
+redis==5.0.1
+sqlalchemy==2.0.25
+psycopg2-binary==2.9.9
+python-jose[cryptography]==3.3.0
+google-auth==2.27.0
+requests==2.31.0
+gunicorn==21.2.0
