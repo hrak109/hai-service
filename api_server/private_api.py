@@ -1,9 +1,9 @@
 from fastapi import FastAPI, HTTPException, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from sqlalchemy import create_engine, Column, Integer, String
+from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.orm import sessionmaker, Session, relationship
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
 from jose import JWTError, jwt
@@ -30,6 +30,17 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String, unique=True, index=True)
     google_id = Column(String, unique=True, index=True)
+    messages = relationship("ChatMessage", back_populates="user")
+
+class ChatMessage(Base):
+    __tablename__ = "chat_messages"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    role = Column(String) # 'user' or 'assistant'
+    content = Column(Text)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    
+    user = relationship("User", back_populates="messages")
 
 # Auth Config
 SECRET_KEY = os.getenv("SECRET_KEY")
@@ -83,9 +94,7 @@ class Token(BaseModel):
 
 class Question(BaseModel):
     q_text: str
-    # auth_params is now derived from the authenticated user if needed, 
-    # or passed explicitly but verified against user permissions.
-    # For now, we'll keep it simple.
+    model: str = "hbb-llama3.2:3b" # Default if not provided
 
 @app.post("/auth/google", response_model=Token)
 def google_login(auth: GoogleAuth, db: Session = Depends(get_db)):
@@ -142,23 +151,37 @@ def get_current_user(authorization: str = Header(None), db: Session = Depends(ge
         raise HTTPException(status_code=401, detail="Could not validate credentials")
 
 @app.post("/ask")
-def ask_question(q: Question, user: User = Depends(get_current_user)):
+def ask_question(q: Question, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     if not q.q_text.strip():
         raise HTTPException(status_code=400, detail="Empty question")
 
     question_id = str(uuid.uuid4())
-    # We can inject user-specific auth params here
-    auth_params = f"user:{user.id}" 
     
-    r.rpush("questions:private", f"{question_id}|{q.q_text}|{auth_params}")
+    # NEW: Save User Message
+    user_msg = ChatMessage(user_id=user.id, role="user", content=q.q_text)
+    db.add(user_msg)
+    db.commit()
+
+    r.rpush("questions:private", f"{question_id}|{q.q_text}|{q.model}")
     return {"question_id": question_id, "status": "queued"}
 
 @app.get("/get_answer/{question_id}")
-def get_answer(question_id: str, user: User = Depends(get_current_user)):
+def get_answer(question_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     key = f"answer:{question_id}"
     answer = r.get(key)
 
     if answer:
+        assistant_msg = ChatMessage(user_id=user.id, role="assistant", content=answer)
+        db.add(assistant_msg)
+        db.commit()
+
         return {"question_id": question_id, "status": "answered", "answer": answer}
     else:
         return {"question_id": question_id, "status": "queued"}
+
+@app.get("/history")
+def get_history(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    # Retrieve last 50 messages
+    messages = db.query(ChatMessage).filter(ChatMessage.user_id == user.id).order_by(ChatMessage.created_at.desc()).limit(50).all()
+    # Reverse to return in chronological order [Older ... Newer]
+    return messages[::-1]

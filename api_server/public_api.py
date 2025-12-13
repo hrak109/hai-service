@@ -34,12 +34,8 @@ def ask_question(q: Question):
         raise HTTPException(status_code=400, detail="Invalid characters in question")
 
     question_id = str(uuid.uuid4())
-    # auth_params is hardcoded for anonymous users
-    # We could restrict this further (e.g., only "public" access)
-    auth_params = "user:anonymous"
-
-    # Push to Redis Queue (Public Queue)
-    r.rpush("questions:public", f"{question_id}|{q.q_text}|{auth_params}")
+    
+    r.rpush("questions:public", f"{question_id}|{q.q_text}|ohp-llama3.2:3b")
     return {"question_id": question_id, "status": "queued"}
 
 @app.get("/get_answer/{question_id}")
