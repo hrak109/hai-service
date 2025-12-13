@@ -38,6 +38,7 @@ class ChatMessage(Base):
     user_id = Column(Integer, ForeignKey("users.id"))
     role = Column(String) # 'user' or 'assistant'
     content = Column(Text)
+    model = Column(String, default="hbb-llama3.2:3b") # NEW: Store model used
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     
     user = relationship("User", back_populates="messages")
@@ -57,9 +58,21 @@ async def lifespan(app: FastAPI):
     try:
         Base.metadata.create_all(bind=engine)
         logger.info("Database tables created (or already matched).")
+        
+        # MIGRATION HACK: Check if 'model' column exists, if not add it.
+        # This is needed because create_all doesn't update existing tables.
+        with engine.connect() as conn:
+            from sqlalchemy import text
+            try:
+                conn.execute(text("ALTER TABLE chat_messages ADD COLUMN model VARCHAR"))
+                conn.commit()
+                logger.info("Added 'model' column to chat_messages via migration hack.")
+            except Exception as e:
+                # Column likely exists
+                logger.info(f"Migration: {e}")
+                
     except Exception as e:
-        # Ignore race conditions where another worker created it simultaneously
-        logger.warning(f"DB Init race condition (likely safe to ignore): {e}")
+        logger.warning(f"DB Init race condition: {e}")
     yield
 
 app = FastAPI(lifespan=lifespan)
@@ -157,8 +170,8 @@ def ask_question(q: Question, user: User = Depends(get_current_user), db: Sessio
 
     question_id = str(uuid.uuid4())
     
-    # NEW: Save User Message
-    user_msg = ChatMessage(user_id=user.id, role="user", content=q.q_text)
+    # NEW: Save User Message with Model
+    user_msg = ChatMessage(user_id=user.id, role="user", content=q.q_text, model=q.model)
     db.add(user_msg)
     db.commit()
 
@@ -166,12 +179,14 @@ def ask_question(q: Question, user: User = Depends(get_current_user), db: Sessio
     return {"question_id": question_id, "status": "queued"}
 
 @app.get("/get_answer/{question_id}")
-def get_answer(question_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def get_answer(question_id: str, model: str = "hbb-llama3.2:3b", user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     key = f"answer:{question_id}"
     answer = r.get(key)
 
     if answer:
-        assistant_msg = ChatMessage(user_id=user.id, role="assistant", content=answer)
+        # NEW: Save Assistant Message with Model
+        # We assume the client passes the correct model that was answering.
+        assistant_msg = ChatMessage(user_id=user.id, role="assistant", content=answer, model=model)
         db.add(assistant_msg)
         db.commit()
 
@@ -180,8 +195,14 @@ def get_answer(question_id: str, user: User = Depends(get_current_user), db: Ses
         return {"question_id": question_id, "status": "queued"}
 
 @app.get("/history")
-def get_history(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def get_history(model: str = None, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    query = db.query(ChatMessage).filter(ChatMessage.user_id == user.id)
+    
+    if model:
+        # Filter by specific model if provided
+        query = query.filter(ChatMessage.model == model)
+        
     # Retrieve last 50 messages
-    messages = db.query(ChatMessage).filter(ChatMessage.user_id == user.id).order_by(ChatMessage.created_at.desc()).limit(50).all()
+    messages = query.order_by(ChatMessage.created_at.desc()).limit(50).all()
     # Reverse to return in chronological order [Older ... Newer]
     return messages[::-1]
