@@ -1,16 +1,16 @@
 .PHONY: up down build logs restart
 
 up:
-	docker compose up -d --build
+	docker compose --env-file .env up -d --build
 
 down:
-	docker compose down
+	docker compose --env-file .env down
 
 build:
-	docker compose build --no-cache
+	docker compose --env-file .env build --no-cache
 
 logs:
-	docker compose logs -f --tail=50
+	docker compose --env-file .env logs -f --tail=50
 
 restart:
-	docker compose down && docker compose up -d --build
+	docker compose --env-file .env down && docker compose --env-file .env up -d --build
