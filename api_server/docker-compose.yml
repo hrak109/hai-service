@@ -4,7 +4,7 @@ services:
     container_name: zookeeper
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_HEAP_OPTS: "-Xmx64M -Xms64M"
+      ZOOKEEPER_HEAP_OPTS: "-Xmx128M -Xms128M"
     ports:
       - "2181:2181"
 
@@ -21,7 +21,7 @@ services:
       - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
       - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
-      - KAFKA_HEAP_OPTS=-Xmx180M -Xms180M
+      - KAFKA_HEAP_OPTS=-Xmx384M -Xms384M
 
   init-kafka:
     image: confluentinc/cp-kafka:7.6.1
@@ -32,15 +32,15 @@ services:
     command: |
       # Block until kafka is reachable
       echo -e 'Waiting for Kafka to be ready...'
-      cub kafka-ready -b kafka:9092 1 40
+      cub kafka-ready -b kafka:29092 1 40
       
       echo -e 'Creating kafka topics'
-      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic questions-socius --replication-factor 1 --partitions 10
-      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic questions-private --replication-factor 1 --partitions 10
-      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic questions-oakhillpines --replication-factor 1 --partitions 10
-      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic answers --replication-factor 1 --partitions 10
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic questions-socius --replication-factor 1 --partitions 10
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic questions-private --replication-factor 1 --partitions 10
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic questions-oakhillpines --replication-factor 1 --partitions 10
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic answers --replication-factor 1 --partitions 10
       echo -e 'Successfully created the following topics:'
-      kafka-topics --bootstrap-server kafka:9092 --list
+      kafka-topics --bootstrap-server kafka:29092 --list
 
   answer-consumer:
     build: .
