@@ -113,4 +113,10 @@ async def consume():
 
 if __name__ == "__main__":
     create_tables()
-    asyncio.run(consume())
+    while True:
+        try:
+            asyncio.run(consume())
+        except Exception as e:
+            logger.error(f"Consumer crashed: {e}. Retrying in 5 seconds...")
+            import time
+            time.sleep(5)
