@@ -29,9 +29,10 @@ services:
       - kafka
     entrypoint: [ '/bin/sh', '-c' ]
     command: |
-      "
       # Block until kafka is reachable
-      kafka-topics --bootstrap-server kafka:9092 --list
+      echo -e 'Waiting for Kafka to be ready...'
+      cub kafka-ready -b kafka:9092 1 40
+      
       echo -e 'Creating kafka topics'
       kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic questions-socius --replication-factor 1 --partitions 10
       kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic questions-private --replication-factor 1 --partitions 10
@@ -39,7 +40,6 @@ services:
       kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic answers --replication-factor 1 --partitions 10
       echo -e 'Successfully created the following topics:'
       kafka-topics --bootstrap-server kafka:9092 --list
-      "
 
   answer-consumer:
     build: .
