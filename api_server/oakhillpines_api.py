@@ -96,8 +96,7 @@ async def ask_question(q: Question, db: Session = Depends(get_db)):
     db.commit()
     
     # Send to Kafka
-    payload = {
-        "question_id": question_id,
+
     # Send to Kafka
     payload = {
         "question_id": question_id,
