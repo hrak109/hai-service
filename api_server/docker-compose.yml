@@ -57,7 +57,7 @@ services:
       POSTGRES_HOST_PRIVATE: postgres-private
       POSTGRES_HOST_SOCIUS: postgres-socius
       POSTGRES_HOST_OAKHILLPINES: postgres-oakhillpines
-      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
 
 
   postgres-private:
@@ -116,7 +116,7 @@ services:
       - POSTGRES_USER=${POSTGRES_USER}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - POSTGRES_HOST=postgres-oakhillpines
-      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
       - DEFAULT_MODEL=${DEFAULT_MODEL_OAKHILLPINES}
     depends_on:
       - postgres-oakhillpines
@@ -137,6 +137,7 @@ services:
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID_PRIVATE}
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS_PRIVATE}
       - DEFAULT_MODEL=${DEFAULT_MODEL_PRIVATE}
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
     depends_on:
       - postgres-private
     command: gunicorn private_api:app --workers 2 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:8001
@@ -156,6 +157,7 @@ services:
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID_SOCIUS}
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS_PRIVATE}
       - DEFAULT_MODEL=${DEFAULT_MODEL_SOCIUS}
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
     depends_on:
       - postgres-socius
     command: gunicorn socius_api:app --workers 2 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:8002

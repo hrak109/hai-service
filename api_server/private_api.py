@@ -52,7 +52,7 @@ SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "10080"))
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
-
+import asyncio
 from contextlib import asynccontextmanager
 
 @asynccontextmanager
@@ -86,9 +86,18 @@ async def lifespan(app: FastAPI):
     
     # Init Kafka Producer
     global producer
-    producer = AIOKafkaProducer(bootstrap_servers=os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092"))
-    await producer.start()
-    
+    producer = AIOKafkaProducer(bootstrap_servers=os.environ["KAFKA_BOOTSTRAP_SERVERS"])
+
+    # Retry loop for Kafka connection
+    while True:
+        try:
+            await producer.start()
+            logger.info("Kafka producer connected successfully.")
+            break
+        except Exception as e:
+            logger.error(f"Kafka connection failed: {e}. Retrying in 5 seconds...")
+            await asyncio.sleep(5)
+
     yield
     
     await producer.stop()

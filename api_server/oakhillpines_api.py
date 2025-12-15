@@ -10,6 +10,7 @@ import uuid
 import os
 import datetime
 import logging
+import asyncio
 from contextlib import asynccontextmanager
 
 # Configure Logging
@@ -46,7 +47,17 @@ async def lifespan(app: FastAPI):
         
     global producer
     producer = AIOKafkaProducer(bootstrap_servers=os.environ["KAFKA_BOOTSTRAP_SERVERS"])
-    await producer.start()
+    
+    # Retry loop for Kafka connection
+    while True:
+        try:
+            await producer.start()
+            logger.info("Kafka producer connected successfully.")
+            break
+        except Exception as e:
+            logger.error(f"Kafka connection failed: {e}. Retrying in 5 seconds...")
+            await asyncio.sleep(5)
+            
     yield
     await producer.stop()
 
