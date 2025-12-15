@@ -4,7 +4,7 @@ services:
     container_name: zookeeper
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_HEAP_OPTS: "-Xmx128M -Xms128M"
+      ZOOKEEPER_HEAP_OPTS: "-Xmx64M -Xms64M"
     ports:
       - "2181:2181"
 
@@ -21,7 +21,7 @@ services:
       - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
       - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
-      - KAFKA_HEAP_OPTS=-Xmx256M -Xms256M
+      - KAFKA_HEAP_OPTS=-Xmx180M -Xms180M
 
   init-kafka:
     image: confluentinc/cp-kafka:7.6.1
