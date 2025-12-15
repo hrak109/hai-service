@@ -181,7 +181,7 @@ def get_current_user(authorization: str = Header(None), db: Session = Depends(ge
         raise HTTPException(status_code=401, detail="Could not validate credentials")
 
 @app.post("/ask")
-def ask_question(q: Question, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+async def ask_question(q: Question, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     if not q.q_text.strip():
         raise HTTPException(status_code=400, detail="Empty question")
 

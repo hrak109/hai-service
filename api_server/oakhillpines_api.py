@@ -88,8 +88,6 @@ async def ask_question(q: Question, db: Session = Depends(get_db)):
         request_id=question_id,
         content=q.q_text,
         role='user',
-        content=q.q_text,
-        role='user',
         model=os.getenv("DEFAULT_MODEL", "ohp-llama3.2:3b")
     )
     db.add(req)
