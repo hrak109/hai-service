@@ -7,3 +7,5 @@ python-jose[cryptography]==3.3.0
 google-auth==2.27.0
 requests==2.31.0
 gunicorn==21.2.0
+aiokafka==0.10.0
+kafka-python==2.0.2

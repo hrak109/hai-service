@@ -1,20 +1,67 @@
 services:
-  redis-public:
-    image: redis:7
-    container_name: redis-public
+  zookeeper:
+    image: confluentinc/cp-zookeeper:latest
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
     ports:
-      - "6379:6379"
+      - "2181:2181"
 
-  redis-private:
-    image: redis:7
-    container_name: redis-private
-    command: redis-server --port 6380
+  kafka:
+    image: confluentinc/cp-kafka:latest
+    container_name: kafka
+    depends_on:
+      - zookeeper
     ports:
-      - "6380:6380"
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: ${KAFKA_BROKER_ID}
+      KAFKA_ZOOKEEPER_CONNECT: ${KAFKA_ZOOKEEPER_CONNECT}
+      KAFKA_ADVERTISED_LISTENERS: ${KAFKA_ADVERTISED_LISTENERS}
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: ${KAFKA_LISTENER_SECURITY_PROTOCOL_MAP}
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: ${KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR}
 
-  postgres:
+  init-kafka:
+    image: confluentinc/cp-kafka:latest
+    container_name: init-kafka
+    depends_on:
+      - kafka
+    entrypoint: [ '/bin/sh', '-c' ]
+    command: |
+      "
+      # Block until kafka is reachable
+      kafka-topics --bootstrap-server kafka:9092 --list
+      echo -e 'Creating kafka topics'
+      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic questions-socius --replication-factor 1 --partitions 10
+      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic questions-private --replication-factor 1 --partitions 10
+      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic questions-oakhillpines --replication-factor 1 --partitions 10
+      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic answers --replication-factor 1 --partitions 10
+      echo -e 'Successfully created the following topics:'
+      kafka-topics --bootstrap-server kafka:9092 --list
+      "
+
+  answer-consumer:
+    build: .
+    container_name: answer-consumer
+    command: python answer_consumer.py
+    depends_on:
+      - kafka
+      - postgres-private
+      - postgres-socius
+      - postgres-oakhillpines
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_HOST_PRIVATE: postgres-private
+      POSTGRES_HOST_SOCIUS: postgres-socius
+      POSTGRES_HOST_OAKHILLPINES: postgres-oakhillpines
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+
+
+  postgres-private:
     image: postgres:15
-    container_name: postgres
+    container_name: postgres-private
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -22,7 +69,31 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_private_data:/var/lib/postgresql/data
+
+  postgres-socius:
+    image: postgres:15
+    container_name: postgres-socius
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_socius_data:/var/lib/postgresql/data
+
+  postgres-oakhillpines:
+    image: postgres:15
+    container_name: postgres-oakhillpines
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "5434:5432"
+    volumes:
+      - postgres_oakhillpines_data:/var/lib/postgresql/data
 
   gateway:
     image: nginx:latest
@@ -34,21 +105,25 @@ services:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
       - /etc/letsencrypt:/etc/letsencrypt:ro
     depends_on:
-      - public-api
+      - oakhillpines-api
       - private-api
+      - socius-api
 
-  public-api:
+  oakhillpines-api:
     build: .
-    container_name: public-api
+    container_name: oakhillpines-api
     expose:
       - "8000"
     environment:
-      - REDIS_HOST=${REDIS_PUBLIC_HOST}
-      - REDIS_PORT=${REDIS_PUBLIC_PORT}
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS_PUBLIC}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_HOST=postgres-oakhillpines
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - DEFAULT_MODEL=${DEFAULT_MODEL_OAKHILLPINES}
     depends_on:
-      - redis-public
-    command: gunicorn public_api:app --workers 4 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
+      - postgres-oakhillpines
+    command: gunicorn oakhillpines_api:app --workers 4 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
 
   private-api:
     build: .
@@ -56,19 +131,39 @@ services:
     expose:
       - "8001"
     environment:
-      - REDIS_HOST=${REDIS_PRIVATE_HOST}
-      - REDIS_PORT=${REDIS_PRIVATE_PORT}
       - POSTGRES_USER=${POSTGRES_USER}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_HOST=postgres-private
       - SECRET_KEY=${SECRET_KEY}
       - ALGORITHM=${ALGORITHM}
       - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES}
-      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID_PRIVATE}
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS_PRIVATE}
+      - DEFAULT_MODEL=${DEFAULT_MODEL_PRIVATE}
     depends_on:
-      - redis-private
-      - postgres
+      - postgres-private
     command: gunicorn private_api:app --workers 4 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:8001
 
+  socius-api:
+    build: .
+    container_name: socius-api
+    expose:
+      - "8002"
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_HOST=postgres-socius
+      - SECRET_KEY=${SECRET_KEY}
+      - ALGORITHM=${ALGORITHM}
+      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID_SOCIUS}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS_PRIVATE}
+      - DEFAULT_MODEL=${DEFAULT_MODEL_SOCIUS}
+    depends_on:
+      - postgres-socius
+    command: gunicorn socius_api:app --workers 4 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:8002
+
 volumes:
-  postgres_data:
+  postgres_private_data:
+  postgres_socius_data:
+  postgres_oakhillpines_data:

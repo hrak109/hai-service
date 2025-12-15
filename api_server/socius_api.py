@@ -200,10 +200,10 @@ def ask_question(q: Question, user: User = Depends(get_current_user), db: Sessio
         "question_id": question_id,
         "text": q.q_text,
         "model": selected_model, 
-        "service": "private",
+        "service": "socius",
         "user_id": user.id
     }
-    await producer.send_and_wait("questions-private", json.dumps(payload).encode('utf-8'))
+    await producer.send_and_wait("questions-socius", json.dumps(payload).encode('utf-8'))
     
     return {"question_id": question_id, "status": "queued"}
 
