@@ -13,7 +13,10 @@ import json
 import uuid
 import os
 import datetime
+import datetime
 import logging
+import random
+import string
 
 # Configure Logging
 logging.basicConfig(level=logging.INFO)
@@ -33,7 +36,35 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String, unique=True, index=True)
     google_id = Column(String, unique=True, index=True)
+    username = Column(String, unique=True, index=True) # NEW: Username
     messages = relationship("ChatMessage", back_populates="user")
+    
+    # Relationships
+    # Removed problematic bidirectional relationship for now, querying directly is safer.
+
+class Friendship(Base):
+    __tablename__ = "friendships"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    friend_id = Column(Integer, ForeignKey("users.id"))
+    status = Column(String, default="pending") # pending, accepted, blocked
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    
+    # No back_populates needed if User doesn't have the relationship
+    user = relationship("User", foreign_keys=[user_id])
+    friend = relationship("User", foreign_keys=[friend_id])
+
+class DirectMessage(Base):
+    __tablename__ = "direct_messages"
+    id = Column(Integer, primary_key=True, index=True)
+    sender_id = Column(Integer, ForeignKey("users.id"))
+    receiver_id = Column(Integer, ForeignKey("users.id"))
+    content = Column(Text)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    read_at = Column(DateTime, nullable=True)
+
+    sender = relationship("User", foreign_keys=[sender_id])
+    receiver = relationship("User", foreign_keys=[receiver_id])
 
 class ChatMessage(Base):
     __tablename__ = "chat_messages"
@@ -80,6 +111,14 @@ async def lifespan(app: FastAPI):
         # This is needed because create_all doesn't update existing tables.
         with engine.connect() as conn:
             from sqlalchemy import text
+            # MIGRATION: Add username
+            try:
+                conn.execute(text("ALTER TABLE users ADD COLUMN username VARCHAR UNIQUE"))
+                conn.commit()
+                logger.info("Added 'username' column to users via migration hack.")
+            except Exception as e:
+                pass
+            
             try:
                 conn.execute(text("ALTER TABLE chat_messages ADD COLUMN model VARCHAR"))
                 conn.commit()
@@ -143,6 +182,16 @@ class GoogleAuth(BaseModel):
 class Token(BaseModel):
     access_token: str
     token_type: str
+    username: str # Return username
+    user_id: int
+
+def generate_username(email: str) -> str:
+    base = email.split('@')[0]
+    # Remove dots and special chars
+    base = "".join(c for c in base if c.isalnum())
+    # Add random suffix
+    suffix = ''.join(random.choices(string.digits, k=4))
+    return f"{base}{suffix}"
 
 class Question(BaseModel):
     q_text: str
@@ -160,9 +209,24 @@ def google_login(auth: GoogleAuth, db: Session = Depends(get_db)):
         
         # Check/Create User
         user = db.query(User).filter(User.google_id == userid).first()
+        user = db.query(User).filter(User.google_id == userid).first()
         if not user:
-            user = User(email=email, google_id=userid)
+            new_username = generate_username(email)
+            # Ensure uniqueness (simple retry logic could be better but sufficient for now)
+            while db.query(User).filter(User.username == new_username).first():
+                new_username = generate_username(email)
+            
+            user = User(email=email, google_id=userid, username=new_username)
             db.add(user)
+            db.commit()
+            db.refresh(user)
+        
+        # Backfill username if missing for existing users
+        if not user.username:
+            new_username = generate_username(email)
+            while db.query(User).filter(User.username == new_username).first():
+                new_username = generate_username(email)
+            user.username = new_username
             db.commit()
             db.refresh(user)
             
@@ -173,7 +237,7 @@ def google_login(auth: GoogleAuth, db: Session = Depends(get_db)):
         to_encode.update({"exp": expire})
         encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
         
-        return {"access_token": encoded_jwt, "token_type": "bearer"}
+        return {"access_token": encoded_jwt, "token_type": "bearer", "username": user.username, "user_id": user.id}
         
     except ValueError as e:
         logger.error(f"Auth Error: {e}")
@@ -311,3 +375,236 @@ def delete_diary_entry(entry_id: int, user: User = Depends(get_current_user), db
     db.delete(db_entry)
     db.commit()
     return {"status": "success"}
+
+# --- SOCIAL ENDPOINTS ---
+
+class UserSearchResponse(BaseModel):
+    id: int
+    username: str
+    email: str # Maybe hide this? showing for now to verify.
+
+class FriendRequest(BaseModel):
+    username: str
+
+class FriendshipResponse(BaseModel):
+    id: int
+    friend_id: int
+    friend_username: str
+    status: str
+    created_at: datetime.datetime
+
+class MessageSend(BaseModel):
+    receiver_id: int
+    content: str
+
+class MessageResponse(BaseModel):
+    id: int
+    sender_id: int
+    receiver_id: int
+    content: str
+    created_at: datetime.datetime
+    is_me: bool
+
+@app.get("/users/search", response_model=list[UserSearchResponse])
+def search_users(q: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if not q:
+        return []
+    # Find users by username match (exclude self)
+    users = db.query(User).filter(User.username.ilike(f"%{q}%"), User.id != user.id).limit(10).all()
+    return [{"id": u.id, "username": u.username, "email": u.email} for u in users]
+
+@app.post("/friends/request")
+def send_friend_request(req: FriendRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    target_user = db.query(User).filter(User.username == req.username).first()
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if target_user.id == user.id:
+        raise HTTPException(status_code=400, detail="Cannot add self")
+
+    # Check existing
+    existing = db.query(Friendship).filter(
+        ((Friendship.user_id == user.id) & (Friendship.friend_id == target_user.id)) |
+        ((Friendship.user_id == target_user.id) & (Friendship.friend_id == user.id))
+    ).first()
+    
+    if existing:
+        if existing.status == 'accepted':
+             raise HTTPException(status_code=400, detail="Already friends")
+        if existing.status == 'pending':
+             raise HTTPException(status_code=400, detail="Request already pending")
+    
+    # Create request
+    # Store as User -> Target (pending)
+    new_friendship = Friendship(user_id=user.id, friend_id=target_user.id, status="pending")
+    db.add(new_friendship)
+    db.commit()
+    return {"status": "sent"}
+
+@app.get("/friends/requests", response_model=list[FriendshipResponse])
+def get_friend_requests(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    # Incoming requests: I am the friend_id, status is pending
+    reqs = db.query(Friendship).filter(Friendship.friend_id == user.id, Friendship.status == 'pending').all()
+    
+    results = []
+    for r in reqs:
+        # The 'user' of the friendship is the one who SENT the request
+        sender = db.query(User).filter(User.id == r.user_id).first()
+        
+        # Lazy backfill username
+        if not sender.username:
+            sender.username = generate_username(sender.email)
+            db.commit()
+            
+        results.append({
+            "id": r.id, # Friendship ID
+            "friend_id": sender.id,
+            "friend_username": sender.username,
+            "status": "incoming",
+            "created_at": r.created_at
+        })
+    return results
+
+@app.post("/friends/accept/{friendship_id}")
+def accept_friend_request(friendship_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    # Find request where I am the target
+    req = db.query(Friendship).filter(Friendship.id == friendship_id, Friendship.friend_id == user.id, Friendship.status == 'pending').first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Request not found")
+    
+    req.status = 'accepted'
+    db.commit()
+    return {"status": "accepted"}
+
+@app.post("/friends/reject/{friendship_id}")
+def reject_friend_request(friendship_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    req = db.query(Friendship).filter(Friendship.id == friendship_id, Friendship.friend_id == user.id, Friendship.status == 'pending').first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Request not found")
+    
+    db.delete(req)
+    db.commit()
+    return {"status": "rejected"}
+
+@app.get("/friends", response_model=list[FriendshipResponse])
+def get_friends(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    # Find all accepted friendships where I am user_id OR friend_id
+    friends_rel = db.query(Friendship).filter(
+        ((Friendship.user_id == user.id) | (Friendship.friend_id == user.id)) & 
+        (Friendship.status == 'accepted')
+    ).all()
+    
+    results = []
+    for f in friends_rel:
+        # Determine who the 'other' person is
+        is_me_sender = f.user_id == user.id
+        other_id = f.friend_id if is_me_sender else f.user_id
+        
+        other_user = db.query(User).filter(User.id == other_id).first()
+        
+        # Lazy backfill username
+        if not other_user.username:
+            other_user.username = generate_username(other_user.email)
+            db.commit()
+
+        results.append({
+            "id": f.id,
+            "friend_id": other_user.id,
+            "friend_username": other_user.username,
+            "status": "accepted",
+            "created_at": f.created_at
+        })
+    return results
+
+@app.delete("/friends/{friend_id}")
+def unfriend(friend_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    # Find friendship
+    rel = db.query(Friendship).filter(
+        ((Friendship.user_id == user.id) & (Friendship.friend_id == friend_id)) |
+        ((Friendship.user_id == friend_id) & (Friendship.friend_id == user.id))
+    ).first()
+    
+    if not rel:
+        raise HTTPException(status_code=404, detail="Friendship not found")
+    
+    # Also delete DMs? Spec says "messages and friends list should be removed"
+    # So we delete relevant DMs too? Or just hide? "removed of that person" implies deletion or hiding.
+    # Let's delete DMs for privacy/safety as requested.
+    db.query(DirectMessage).filter(
+        ((DirectMessage.sender_id == user.id) & (DirectMessage.receiver_id == friend_id)) |
+        ((DirectMessage.sender_id == friend_id) & (DirectMessage.receiver_id == user.id))
+    ).delete()
+    
+    db.delete(rel)
+    db.commit()
+    return {"status": "removed"}
+
+
+# --- DM ENDPOINTS ---
+
+def check_friendship(user_id: int, other_id: int, db: Session):
+    return db.query(Friendship).filter(
+        ((Friendship.user_id == user_id) & (Friendship.friend_id == other_id)) |
+        ((Friendship.user_id == other_id) & (Friendship.friend_id == user_id)),
+        Friendship.status == 'accepted'
+    ).first()
+
+@app.get("/messages/recent")
+def get_recent_conversations(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    # Get all friends
+    friends_list = get_friends(user, db)
+    
+    convos = []
+    for f in friends_list:
+        fid = f.friend_id
+        # Get last message
+        last_msg = db.query(DirectMessage).filter(
+            ((DirectMessage.sender_id == user.id) & (DirectMessage.receiver_id == fid)) |
+            ((DirectMessage.sender_id == fid) & (DirectMessage.receiver_id == user.id))
+        ).order_by(DirectMessage.created_at.desc()).first()
+        
+        convos.append({
+            "friend_id": fid,
+            "friend_username": f.friend_username,
+            "last_message": last_msg.content if last_msg else "No messages yet",
+            "last_message_time": last_msg.created_at if last_msg else None
+        })
+    
+    # Sort by time
+    convos.sort(key=lambda x: x['last_message_time'] or datetime.datetime.min, reverse=True)
+    return convos
+
+@app.get("/messages/{friend_id}", response_model=list[MessageResponse])
+def get_messages(friend_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if not check_friendship(user.id, friend_id, db):
+        raise HTTPException(status_code=403, detail="Not friends")
+
+    msgs = db.query(DirectMessage).filter(
+        ((DirectMessage.sender_id == user.id) & (DirectMessage.receiver_id == friend_id)) |
+        ((DirectMessage.sender_id == friend_id) & (DirectMessage.receiver_id == user.id))
+    ).order_by(DirectMessage.created_at.asc()).all() # Oldest first for chat UI
+    
+    return [
+        {
+            "id": m.id,
+            "sender_id": m.sender_id,
+            "receiver_id": m.receiver_id,
+            "content": m.content,
+            "created_at": m.created_at,
+            "is_me": m.sender_id == user.id
+        }
+        for m in msgs
+    ]
+
+@app.post("/messages")
+def send_message(msg: MessageSend, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if not check_friendship(user.id, msg.receiver_id, db):
+        raise HTTPException(status_code=403, detail="Not friends")
+    
+    new_msg = DirectMessage(
+        sender_id=user.id,
+        receiver_id=msg.receiver_id,
+        content=msg.content
+    )
+    db.add(new_msg)
+    db.commit()
+    return {"status": "sent"}
