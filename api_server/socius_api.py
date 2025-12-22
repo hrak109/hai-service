@@ -47,6 +47,19 @@ class ChatMessage(Base):
     
     user = relationship("User", back_populates="messages")
 
+class UserDiary(Base):
+    __tablename__ = "user_diaries"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    content = Column(Text)
+    date = Column(String) # YYYY-MM-DD
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    
+    user = relationship("User", back_populates="diaries")
+
+User.diaries = relationship("UserDiary", back_populates="user")
+
 # Auth Config
 SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
@@ -238,3 +251,63 @@ def get_history(model: str = None, user: User = Depends(get_current_user), db: S
     messages = query.order_by(ChatMessage.created_at.desc()).limit(50).all()
     # Reverse to return in chronological order [Older ... Newer]
     return messages[::-1]
+
+# --- DIARY ENDPOINTS ---
+
+class DiaryCreate(BaseModel):
+    content: str
+    date: str # YYYY-MM-DD
+
+class DiaryUpdate(BaseModel):
+    content: str
+
+class DiaryResponse(BaseModel):
+    id: int
+    content: str
+    date: str
+    created_at: datetime.datetime
+
+    class Config:
+        orm_mode = True
+
+@app.post("/diary", response_model=DiaryResponse)
+def create_diary_entry(entry: DiaryCreate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    # Check if entry already exists for this date? Optional. For now, allow multiple or just insert.
+    # Let's assume one entry per day for simplicity, or just append distinct entries. 
+    # Current requirement doesn't specify strict one-per-day, so we'll just create new entries.
+    
+    new_entry = UserDiary(
+        user_id=user.id,
+        content=entry.content,
+        date=entry.date
+    )
+    db.add(new_entry)
+    db.commit()
+    db.refresh(new_entry)
+    return new_entry
+
+@app.get("/diary", response_model=list[DiaryResponse])
+def get_diary_entries(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    entries = db.query(UserDiary).filter(UserDiary.user_id == user.id).order_by(UserDiary.date.desc(), UserDiary.created_at.desc()).all()
+    return entries
+
+@app.put("/diary/{entry_id}", response_model=DiaryResponse)
+def update_diary_entry(entry_id: int, entry: DiaryUpdate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    db_entry = db.query(UserDiary).filter(UserDiary.id == entry_id, UserDiary.user_id == user.id).first()
+    if not db_entry:
+        raise HTTPException(status_code=404, detail="Diary entry not found")
+    
+    db_entry.content = entry.content
+    db.commit()
+    db.refresh(db_entry)
+    return db_entry
+
+@app.delete("/diary/{entry_id}")
+def delete_diary_entry(entry_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    db_entry = db.query(UserDiary).filter(UserDiary.id == entry_id, UserDiary.user_id == user.id).first()
+    if not db_entry:
+        raise HTTPException(status_code=404, detail="Diary entry not found")
+    
+    db.delete(db_entry)
+    db.commit()
+    return {"status": "success"}
