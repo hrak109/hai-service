@@ -728,7 +728,9 @@ def send_message(msg: MessageSend, user: User = Depends(get_current_user), db: S
                             to=receiver.expo_push_token,
                             title=f"New message from {sender_name}",
                             body=msg.content,
-                            data={"url": f"/messages/{user.id}"}
+                            data={"url": f"/messages/{user.id}"},
+                            sound="default",
+                            channel_id="default"
                         )
                     )
                     logger.info(f"Push notification sent successfully: {response}")

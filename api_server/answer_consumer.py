@@ -85,6 +85,7 @@ def send_push_notification(token, title, message, data=None):
                         body=message,
                         data=data,
                         sound="default",
+                        channel_id="default",
                         badge=1)) # Increment badge? Or just set? For now just send.
     except PushServerError as exc:
         logger.error(f"Push Server Error: {exc.errors} | {exc.response_data}")
