@@ -586,7 +586,7 @@ def get_recent_conversations(user: User = Depends(get_current_user), db: Session
     
     convos = []
     for f in friends_list:
-        fid = f.friend_id
+        fid = f['friend_id']
         # Get last message
         last_msg = db.query(DirectMessage).filter(
             ((DirectMessage.sender_id == user.id) & (DirectMessage.receiver_id == fid)) |
@@ -595,7 +595,7 @@ def get_recent_conversations(user: User = Depends(get_current_user), db: Session
         
         convos.append({
             "friend_id": fid,
-            "friend_username": f.friend_username,
+            "friend_username": f['friend_username'],
             "last_message": last_msg.content if last_msg else "No messages yet",
             "last_message_time": last_msg.created_at if last_msg else None
         })
