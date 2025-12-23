@@ -478,8 +478,10 @@ def update_user_profile(update: UserUpdate, user: User = Depends(get_current_use
 
 @app.post("/notifications/token")
 def update_push_token(token_data: PushTokenUpdate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    logger.info(f"Received push token update for user {user.username}: {token_data.token}")
     user.expo_push_token = token_data.token
     db.commit()
+    logger.info("Push token saved to DB.")
     return {"status": "updated"}
 
 @app.get("/notifications/unread")
