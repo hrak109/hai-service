@@ -335,6 +335,23 @@ def get_history(model: str = None, user: User = Depends(get_current_user), db: S
     # Reverse to return in chronological order [Older ... Newer]
     return messages[::-1]
 
+class ClearHistoryRequest(BaseModel):
+    model: str
+
+@app.post("/clear_history")
+def clear_history(req: ClearHistoryRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    # Delete all messages for this user and model
+    # Note: If no model is specified in request (empty string?), maybe delete all? 
+    # Frontend sends { model: selectedModel }.
+    
+    query = db.query(ChatMessage).filter(ChatMessage.user_id == user.id)
+    if req.model:
+        query = query.filter(ChatMessage.model == req.model)
+        
+    query.delete(synchronize_session=False)
+    db.commit()
+    return {"status": "success"}
+
 # --- DIARY ENDPOINTS ---
 
 class DiaryCreate(BaseModel):
@@ -697,24 +714,33 @@ def send_message(msg: MessageSend, user: User = Depends(get_current_user), db: S
     db.commit()
 
     # Trigger Push Notification
+    # Trigger Push Notification
     try:
         receiver = db.query(User).filter(User.id == msg.receiver_id).first()
-        if receiver and receiver.expo_push_token:
-            sender_name = user.username
-            try:
-                response = PushClient().publish(
-                    PushMessage(
-                        to=receiver.expo_push_token,
-                        title=f"New message from {sender_name}",
-                        body=msg.content,
-                        data={"url": f"/messages/{user.id}"}
+        if receiver:
+            logger.info(f"Attempting to notify user {receiver.id} ({receiver.username})")
+            if receiver.expo_push_token:
+                logger.info(f"Found push token: {receiver.expo_push_token}")
+                sender_name = user.username
+                try:
+                    response = PushClient().publish(
+                        PushMessage(
+                            to=receiver.expo_push_token,
+                            title=f"New message from {sender_name}",
+                            body=msg.content,
+                            data={"url": f"/messages/{user.id}"}
+                        )
                     )
-                )
-            except (ConnectionError, HTTPError) as exc:
-                logger.error(f"Push notification failed: {exc}")
-            except Exception as exc: # exponent_server_sdk might raise other errors
-                 logger.error(f"Push notification failed: {exc}")
+                    logger.info(f"Push notification sent successfully: {response}")
+                except (ConnectionError, HTTPError) as exc:
+                    logger.error(f"Push notification failed (connection/http): {exc}")
+                except Exception as exc: # exponent_server_sdk might raise other errors
+                     logger.error(f"Push notification failed (general): {exc}")
+            else:
+                 logger.warning("Receiver has no expo_push_token")
+        else:
+             logger.warning("Receiver user not found for notification")
     except Exception as e:
-        logger.error(f"Error sending push notification: {e}")
+        logger.error(f"Error sending push notification block: {e}")
 
     return {"status": "sent"}
