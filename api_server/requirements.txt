@@ -9,4 +9,4 @@ requests==2.31.0
 gunicorn==21.2.0
 aiokafka==0.10.0
 kafka-python==2.0.2
-exponent_server_sdk==2.0.0
+firebase-admin==6.6.0

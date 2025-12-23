@@ -1,3 +1,4 @@
+```python
 import os
 import json
 import logging
@@ -7,6 +8,7 @@ from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, F
 from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy.sql import text
 import datetime
+from firebase_admin import messaging
 
 # Configure Logging
 logging.basicConfig(level=logging.INFO)
@@ -69,28 +71,51 @@ def create_tables():
             logger.error(f"Table create error for {name}: {e}")
 
 # Push Notification Logic
-from exponent_server_sdk import (
-    PushClient,
-    PushMessage,
-    PushServerError,
-    PushTicketError,
-)
-import requests.exceptions
+import firebase_admin
+from firebase_admin import credentials, messaging
 
-def send_push_notification(token, title, message, data=None):
+# Initialize Firebase Admin SDK
+import os
+cred_path = os.path.join(os.path.dirname(__file__), "firebase-service-account.json")
+try:
+    if os.path.exists(cred_path):
+        cred = credentials.Certificate(cred_path)
+        # Check if already initialized to avoid error
+        if not firebase_admin._apps:
+            firebase_admin.initialize_app(cred)
+        logger.info("Firebase Admin SDK initialized successfully.")
+    else:
+        logger.error(f"Credentials not found at {cred_path}")
+except Exception as e:
+    logger.error(f"Failed to initialize Firebase Admin SDK: {e}")
+
+async def send_push_notification(token, title, message, data=None):
     try:
-        response = PushClient().publish(
-            PushMessage(to=token,
-                        title=title,
-                        body=message,
-                        data=data,
-                        sound="default",
-                        channel_id="default",
-                        badge=1)) # Increment badge? Or just set? For now just send.
-    except PushServerError as exc:
-        logger.error(f"Push Server Error: {exc.errors} | {exc.response_data}")
-    except (requests.exceptions.ConnectionError, requests.exceptions.HTTPError) as exc:
-         logger.error(f"Push Connection Error: {exc}")
+        # Construct the message payload for FCM
+        # We use explicit AndroidConfig to ensure high priority and proper channel
+        msg = messaging.Message(
+            token=token,
+            notification=messaging.Notification(
+                title=title,
+                body=message,
+            ),
+            data=data or {},
+            android=messaging.AndroidConfig(
+                priority='high',
+                notification=messaging.AndroidNotification(
+                    channel_id='default',
+                    sound='default',
+                    click_action='FLUTTER_NOTIFICATION_CLICK', # Standard for many, but Expo might just need default
+                ),
+            ),
+        )
+        
+        # Send the message
+        response = messaging.send(msg)
+        logger.info(f"Successfully sent message: {response}")
+        
+    except Exception as e:
+        logger.error(f"Failed to send notification: {e}")
 
 
 async def consume():

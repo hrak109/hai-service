@@ -16,9 +16,18 @@ import datetime
 import datetime
 import logging
 import random
-import string
-from exponent_server_sdk import PushClient, PushMessage
+import firebase_admin
+from firebase_admin import credentials, messaging
 from requests.exceptions import ConnectionError, HTTPError
+
+# Initialize Firebase Admin
+cred_path = os.path.join(os.path.dirname(__file__), "firebase-service-account.json")
+if os.path.exists(cred_path):
+    print(f"Loading Firebase credentials from {cred_path}")
+    cred = credentials.Certificate(cred_path)
+    firebase_admin.initialize_app(cred)
+else:
+    print(f"WARNING: Firebase credentials not found at {cred_path}")
 
 
 # Configure Logging
@@ -725,21 +734,27 @@ def send_message(msg: MessageSend, user: User = Depends(get_current_user), db: S
                 logger.info(f"Found push token: {receiver.expo_push_token}")
                 sender_name = user.username
                 try:
-                    response = PushClient().publish(
-                        PushMessage(
-                            to=receiver.expo_push_token,
+                    # Construct FCM Message
+                    msg = messaging.Message(
+                        token=receiver.expo_push_token,
+                        notification=messaging.Notification(
                             title=f"New message from {sender_name}",
                             body=msg.content,
-                            data={"url": f"/messages/{user.id}"},
-                            sound="default",
-                            channel_id="default"
-                        )
+                        ),
+                        data={"url": f"/messages/{user.id}"},
+                        android=messaging.AndroidConfig(
+                            priority='high',
+                            notification=messaging.AndroidNotification(
+                                channel_id='default',
+                                sound='default',
+                                click_action='FLUTTER_NOTIFICATION_CLICK',
+                            ),
+                        ),
                     )
+                    response = messaging.send(msg)
                     logger.info(f"Push notification sent successfully: {response}")
-                except (ConnectionError, HTTPError) as exc:
-                    logger.error(f"Push notification failed (connection/http): {exc}")
-                except Exception as exc: # exponent_server_sdk might raise other errors
-                     logger.error(f"Push notification failed (general): {exc}")
+                except Exception as exc:
+                     logger.error(f"Push notification failed: {exc}")
             else:
                  logger.warning("Receiver has no expo_push_token")
         else:
