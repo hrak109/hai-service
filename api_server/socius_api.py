@@ -113,36 +113,44 @@ async def lifespan(app: FastAPI):
         
         # MIGRATION HACK: Check if 'model' column exists, if not add it.
         # This is needed because create_all doesn't update existing tables.
-        with engine.connect() as conn:
-            from sqlalchemy import text
-            # MIGRATION: Add username
-            try:
+        from sqlalchemy import text
+
+        # MIGRATION: Add username
+        try:
+            with engine.connect() as conn:
                 conn.execute(text("ALTER TABLE users ADD COLUMN username VARCHAR UNIQUE"))
                 conn.commit()
                 logger.info("Added 'username' column to users via migration hack.")
-            except Exception as e:
-                pass
-            
-            try:
+        except Exception as e:
+            # logger.warning(f"Migration (username) skipped/failed: {e}")
+            pass
+        
+        # MIGRATION: Add model to chat_messages
+        try:
+            with engine.connect() as conn:
                 conn.execute(text("ALTER TABLE chat_messages ADD COLUMN model VARCHAR"))
                 conn.commit()
                 logger.info("Added 'model' column to chat_messages via migration hack.")
-            except Exception as e:
-                pass
+        except Exception as e:
+             pass
 
-            try:
+        # MIGRATION: Add request_id to chat_messages
+        try:
+            with engine.connect() as conn:
                 conn.execute(text("ALTER TABLE chat_messages ADD COLUMN request_id VARCHAR"))
                 conn.commit()
                 logger.info("Added 'request_id' column to chat_messages via migration hack.")
-            except Exception as e:
-                pass
+        except Exception as e:
+             pass
 
-            try:
+        # MIGRATION: Add expo_push_token to users
+        try:
+            with engine.connect() as conn:
                 conn.execute(text("ALTER TABLE users ADD COLUMN expo_push_token VARCHAR"))
                 conn.commit()
                 logger.info("Added 'expo_push_token' column to users via migration hack.")
-            except Exception as e:
-                pass
+        except Exception as e:
+             pass
                 
     except Exception as e:
         logger.warning(f"DB Init race condition: {e}")
