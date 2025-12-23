@@ -465,6 +465,24 @@ def update_push_token(token_data: PushTokenUpdate, user: User = Depends(get_curr
     db.commit()
     return {"status": "updated"}
 
+@app.get("/notifications/unread")
+def get_unread_counts(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    # 1. Pending Friend Requests (incoming)
+    friend_requests = db.query(Friendship).filter(Friendship.friend_id == user.id, Friendship.status == 'pending').count()
+    
+    # 2. Unread Direct Messages (incoming)
+    # Count messages where I am receiver AND read_at is None
+    unread_messages = db.query(DirectMessage).filter(
+        DirectMessage.receiver_id == user.id,
+        DirectMessage.read_at == None
+    ).count()
+    
+    return {
+        "friend_requests": friend_requests,
+        "unread_messages": unread_messages,
+        "total": friend_requests + unread_messages
+    }
+
 @app.get("/users/search", response_model=list[UserSearchResponse])
 def search_users(q: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     if not q:
@@ -642,6 +660,16 @@ def get_messages(friend_id: int, user: User = Depends(get_current_user), db: Ses
         ((DirectMessage.sender_id == user.id) & (DirectMessage.receiver_id == friend_id)) |
         ((DirectMessage.sender_id == friend_id) & (DirectMessage.receiver_id == user.id))
     ).order_by(DirectMessage.created_at.asc()).all() # Oldest first for chat UI
+    
+    # Mark incoming unread messages as read
+    dirty = False
+    for m in msgs:
+        if m.receiver_id == user.id and m.read_at is None:
+            m.read_at = datetime.datetime.utcnow()
+            dirty = True
+            
+    if dirty:
+        db.commit()
     
     return [
         {
