@@ -405,6 +405,37 @@ class MessageResponse(BaseModel):
     created_at: datetime.datetime
     is_me: bool
 
+class UserUpdate(BaseModel):
+    username: str
+
+@app.get("/users/me", response_model=UserSearchResponse)
+def get_user_profile(user: User = Depends(get_current_user)):
+    return {"id": user.id, "username": user.username, "email": user.email}
+
+@app.put("/users/me", response_model=UserSearchResponse)
+def update_user_profile(update: UserUpdate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    # Validate username format (simple check)
+    new_username = update.username.strip()
+    if not new_username:
+        raise HTTPException(status_code=400, detail="Username cannot be empty")
+    if len(new_username) < 3:
+        raise HTTPException(status_code=400, detail="Username must be at least 3 characters")
+    
+    # Check if unchanged
+    if new_username == user.username:
+        return {"id": user.id, "username": user.username, "email": user.email}
+
+    # Check uniqueness
+    existing = db.query(User).filter(User.username == new_username).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Username already taken")
+    
+    user.username = new_username
+    db.commit()
+    db.refresh(user)
+    
+    return {"id": user.id, "username": user.username, "email": user.email}
+
 @app.get("/users/search", response_model=list[UserSearchResponse])
 def search_users(q: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     if not q:
