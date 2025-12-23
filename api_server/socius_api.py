@@ -17,6 +17,9 @@ import datetime
 import logging
 import random
 import string
+from exponent_server_sdk import PushClient, PushMessage
+from requests.exceptions import ConnectionError, HTTPError
+
 
 # Configure Logging
 logging.basicConfig(level=logging.INFO)
@@ -37,6 +40,7 @@ class User(Base):
     email = Column(String, unique=True, index=True)
     google_id = Column(String, unique=True, index=True)
     username = Column(String, unique=True, index=True) # NEW: Username
+    expo_push_token = Column(String, nullable=True) # NEW: Push Token
     messages = relationship("ChatMessage", back_populates="user")
     
     # Relationships
@@ -130,6 +134,13 @@ async def lifespan(app: FastAPI):
                 conn.execute(text("ALTER TABLE chat_messages ADD COLUMN request_id VARCHAR"))
                 conn.commit()
                 logger.info("Added 'request_id' column to chat_messages via migration hack.")
+            except Exception as e:
+                pass
+
+            try:
+                conn.execute(text("ALTER TABLE users ADD COLUMN expo_push_token VARCHAR"))
+                conn.commit()
+                logger.info("Added 'expo_push_token' column to users via migration hack.")
             except Exception as e:
                 pass
                 
@@ -408,6 +419,10 @@ class MessageResponse(BaseModel):
 class UserUpdate(BaseModel):
     username: str
 
+class PushTokenUpdate(BaseModel):
+    token: str
+
+
 @app.get("/users/me", response_model=UserSearchResponse)
 def get_user_profile(user: User = Depends(get_current_user)):
     return {"id": user.id, "username": user.username, "email": user.email}
@@ -435,6 +450,12 @@ def update_user_profile(update: UserUpdate, user: User = Depends(get_current_use
     db.refresh(user)
     
     return {"id": user.id, "username": user.username, "email": user.email}
+
+@app.post("/notifications/token")
+def update_push_token(token_data: PushTokenUpdate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    user.expo_push_token = token_data.token
+    db.commit()
+    return {"status": "updated"}
 
 @app.get("/users/search", response_model=list[UserSearchResponse])
 def search_users(q: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -638,4 +659,26 @@ def send_message(msg: MessageSend, user: User = Depends(get_current_user), db: S
     )
     db.add(new_msg)
     db.commit()
+
+    # Trigger Push Notification
+    try:
+        receiver = db.query(User).filter(User.id == msg.receiver_id).first()
+        if receiver and receiver.expo_push_token:
+            sender_name = user.username
+            try:
+                response = PushClient().publish(
+                    PushMessage(
+                        to=receiver.expo_push_token,
+                        title=f"New message from {sender_name}",
+                        body=msg.content,
+                        data={"url": f"/messages/{user.id}"}
+                    )
+                )
+            except (ConnectionError, HTTPError) as exc:
+                logger.error(f"Push notification failed: {exc}")
+            except Exception as exc: # exponent_server_sdk might raise other errors
+                 logger.error(f"Push notification failed: {exc}")
+    except Exception as e:
+        logger.error(f"Error sending push notification: {e}")
+
     return {"status": "sent"}
